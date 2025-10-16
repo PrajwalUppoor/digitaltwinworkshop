@@ -1,0 +1,32 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+env/
+build/
+dist/
+db_data
+\.git
+*.sqlite3
+
+# exclude large installers and documents that are in the repo root
+*.exe
+*.pdf
+*.pptx
+*.fmu
+
+# ignore large binary and data files that are not needed in the image
+OpenModelica-*
+*.exe
+*.pptx
+*.ppt
+*.pdf
+*.fmu
+*.fmup
+*.mp4
+*.zip
+*.tar
+venv/
+environment.yml
+node_modules/

@@ -1,0 +1,1 @@
+["temperature", "humidity", "power_consumption", "operating_hours", "occupancy", "temp_rolling_mean", "temp_rolling_std", "temp_change", "temp_humidity_ratio", "power_efficiency", "temp_alarm", "power_alarm"]

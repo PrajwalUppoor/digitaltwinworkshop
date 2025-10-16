@@ -1,0 +1,82 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Pyenv
+.python-version
+
+# Virtual environments
+venv/
+ENV/
+.venv/
+.venv*/
+env/
+
+# Jupyter
+.ipynb_checkpoints
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+logs/
+*.tmp
+*.swp
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Docker
+docker-compose.override.yml
+docker-compose.*.yml
+db_data/
+
+# SQL
+*.sqlite3
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Streamlit local config
+frontend/.streamlit/
+
+# IDE specific
+.mypy_cache/
+.pytest_cache/
+
+# keep model files tracked by default (do NOT ignore *.pkl)
+# If you want to ignore local large model artifacts, add them explicitly here.
