@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy only the application package and the model file to avoid huge build contexts
 COPY app /app/app
 COPY smart_home_model.pkl /app/smart_home_model.pkl
+COPY feature_columns.json /app/feature_columns.json
 COPY digital_twin_history.csv /app/data/digital_twin_history.csv
 COPY docker-compose.yml /app/docker-compose.yml
 

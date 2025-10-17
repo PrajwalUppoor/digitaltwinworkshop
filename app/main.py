@@ -20,6 +20,11 @@ from sqlmodel import select, Session
 
 from .database import init_db, get_session
 from .models import Item
+import json
+import pandas as pd
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi import UploadFile, File as FAFile, Form
+from sklearn.metrics import confusion_matrix, classification_report
 
 app = FastAPI(title="digitaltwin-fastapi")
 
@@ -129,6 +134,137 @@ def model_status():
         return {"loaded": True, "type": "unknown"}
 
 
+@app.get('/feature-columns')
+def feature_columns():
+    """Return the feature columns used by the model (from file)."""
+    cols = _load_feature_columns()
+    if cols is None:
+        return JSONResponse(status_code=404, content={"error": "feature_columns.json not found in expected locations"})
+    return {"columns": cols}
+
+
+def _load_feature_columns():
+    """Try to load feature_columns.json from several likely locations and return list or None."""
+    candidates = [
+        os.path.join(os.getcwd(), 'feature_columns.json'),
+        os.path.join(os.getcwd(), 'data', 'feature_columns.json'),
+        '/app/feature_columns.json',
+        '/app/data/feature_columns.json',
+    ]
+    for c in candidates:
+        try:
+            if os.path.exists(c):
+                with open(c) as f:
+                    return json.load(f)
+        except Exception:
+            continue
+    return None
+
+
+@app.get('/history')
+def history():
+    """Return digital twin history rows as JSON (from CSV if present)."""
+    candidates = [
+        os.path.join(os.getcwd(), 'digital_twin_history.csv'),
+        os.path.join(os.getcwd(), 'data', 'digital_twin_history.csv'),
+        '/app/data/digital_twin_history.csv',
+    ]
+    p = None
+    for c in candidates:
+        if os.path.exists(c):
+            p = c
+            break
+    if p is None:
+        return JSONResponse(status_code=404, content={"error": "digital_twin_history.csv not found in expected locations"})
+    try:
+        df = pd.read_csv(p)
+        # convert timestamps to iso format if present
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp']).astype(str)
+        return df.to_dict(orient='records')
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get('/model-info')
+def model_info():
+    """Return model metadata: feature importances and a simple confusion matrix
+    if available. This is best-effort; returns what exists on the loaded model.
+    """
+    if MODEL is None:
+        return JSONResponse(status_code=404, content={"error": "Model not loaded"})
+
+    info = {}
+    # feature importances
+    try:
+        import numpy as _np
+        fi = getattr(MODEL, 'feature_importances_', None)
+        if fi is not None:
+            cols = _load_feature_columns()
+            if cols is None or len(cols) != len(fi):
+                # fallback to generic names if lengths mismatch
+                cols = [f'feature_{i}' for i in range(len(fi))]
+            info['feature_importances'] = dict(zip(cols, _np.round(_np.array(fi).tolist(), 4)))
+    except Exception:
+        pass
+
+    # confusion matrix: if we have a stored test set or the model has attributes, skip for now
+    # we leave room for future: users can upload a test set and we compute it here.
+
+    return info
+
+
+@app.post('/confusion')
+async def confusion(file: UploadFile = FAFile(...), label_column: str = Form("ac_status")):
+    """Compute confusion matrix and classification report from an uploaded CSV.
+
+    Expects a CSV with the true labels in `label_column` and the feature columns
+    matching `feature_columns.json`. Returns a JSON with the confusion matrix
+    and a classification report (precision/recall/f1) when possible.
+    """
+    if MODEL is None:
+        return JSONResponse(status_code=404, content={"error": "Model not loaded"})
+
+    # load CSV into a DataFrame
+    try:
+        import io
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"Failed to read uploaded CSV: {e}"})
+
+    # load feature columns
+    cols = _load_feature_columns()
+    if cols is None:
+        return JSONResponse(status_code=400, content={"error": "feature_columns.json not found; cannot select features"})
+
+    # ensure label column exists
+    if label_column not in df.columns:
+        return JSONResponse(status_code=400, content={"error": f"Label column '{label_column}' not found in uploaded CSV"})
+
+    # ensure feature columns exist in df
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        return JSONResponse(status_code=400, content={"error": f"Missing feature columns in CSV: {missing}"})
+
+    try:
+        X = df[cols].values
+        y_true = df[label_column].values
+        # predict
+        y_pred = MODEL.predict(X)
+        # compute confusion matrix
+        labels = sorted(list(set(list(y_true) + list(y_pred))))
+        cm = confusion_matrix(y_true, y_pred, labels=labels).tolist()
+        creport = classification_report(y_true, y_pred, labels=labels, output_dict=True)
+        return {
+            "labels": labels,
+            "confusion_matrix": cm,
+            "classification_report": creport,
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to compute confusion matrix: {e}"})
+
+
 @app.get('/history')
 def history():
     """Return the history CSV as JSON rows (list of dicts)."""
@@ -205,9 +341,39 @@ def predict(req: PredictRequest):
             # if querying n_features_in_ fails, continue and let predict raise if needed
             pass
 
+        # prediction
         pred = MODEL.predict(X)
         # convert numpy types to native Python
         result = pred.tolist() if hasattr(pred, "tolist") else list(pred)
-        return {"prediction": result}
+
+        # probability/confidence when available
+        prob = None
+        try:
+            if hasattr(MODEL, "predict_proba"):
+                proba = MODEL.predict_proba(X)
+                # choose probability of positive class if binary, else full vector
+                prob = proba.tolist()
+        except Exception:
+            prob = None
+
+        # include feature importances (if model exposes them)
+        fi_map = None
+        try:
+            fi = getattr(MODEL, 'feature_importances_', None)
+            if fi is not None:
+                cols = _load_feature_columns()
+                if cols is None or len(cols) != len(fi):
+                    cols = [f'feature_{i}' for i in range(len(fi))]
+                # convert to simple serializable mapping
+                fi_map = dict(zip(cols, [float(x) for x in list(fi)]))
+        except Exception:
+            fi_map = None
+
+        resp = {"prediction": result}
+        if prob is not None:
+            resp["probability"] = prob
+        if fi_map is not None:
+            resp["feature_importances"] = fi_map
+        return resp
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")

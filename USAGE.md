@@ -1,86 +1,118 @@
-# digitaltwin - Usage
+(# digitaltwin — Usage)
 
-This document explains how to run the backend (FastAPI) and a simple React frontend that consumes the API. It also provides curl examples.
+This document explains how to run the backend (FastAPI + Postgres) and the Streamlit dashboard, and describes the API endpoints you can use for predictions, model metadata, and history.
 
-Prerequisites
-- Docker and Docker Compose (recommended)
-- Or Python 3.10+ and the dependencies in `requirements.txt`
+Requirements
+- Docker & Docker Compose (recommended)
+- Or Python 3.10+ and the dependencies in `requirements.txt` and `frontend/requirements.txt`
 
-Run with Docker Compose
+Start with Docker Compose (recommended)
+
 1. Build and start services:
 
 ```powershell
 docker compose up --build -d
 ```
 
-2. View backend logs:
+2. Tail logs if needed:
 
 ```powershell
 docker compose logs -f web
+docker compose logs -f dashboard
 ```
 
-3. The API will be available at http://localhost:8000
+API endpoints
 
-Useful endpoints
-- GET /model-status  — returns whether a model is loaded
-- POST /predict     — run a prediction; body: { "features": [0.1, 1.2, 3.4] }
-- GET /items/ etc.  — CRUD items backed by the Postgres DB
+- GET /model-status
+	- Returns whether a model is loaded and its type.
+- POST /predict
+	- Body: { "features": [f1, f2, ...] }
+	- Returns a JSON prediction.
+	- The server validates the number of features when possible and returns HTTP 400 if the length mismatches the model's expected input.
+- GET /feature-columns
+	- Returns an ordered list of feature names (so you can submit features in correct order).
+- GET /model-info
+	- Returns simple model metadata (feature importances if available).
+- GET /history
+	- Returns the digital twin history (from `digital_twin_history.csv`) as JSON.
+- GET /items/
+	- CRUD endpoints for example items stored in Postgres.
 
 Curl examples
 
 Check model status:
 
-```bash
+```powershell
 curl -s http://127.0.0.1:8000/model-status | jq
+```
+
+Get feature columns:
+
+```powershell
+curl -s http://127.0.0.1:8000/feature-columns | jq
+```
+
+Get model info (feature importances):
+
+```powershell
+curl -s http://127.0.0.1:8000/model-info | jq
+```
+
+Download recent history (first 5 rows):
+
+```powershell
+curl -s http://127.0.0.1:8000/history | jq '.[0:5]'
 ```
 
 Run prediction (example):
 
-```bash
+```powershell
 curl -s -X POST http://127.0.0.1:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"features": [0.1, 1.2, 3.4]}' | jq
+	-H "Content-Type: application/json" \
+	-d '{"features": [0.1, 1.2, 3.4]}' | jq
 ```
 
-If the model is not loaded the `/predict` endpoint will return HTTP 503.
+Streamlit dashboard
 
-Run the React frontend (development)
+The repository includes a Streamlit dashboard at `frontend/streamlit_app.py`. It displays:
+- Model status and type
+- Feature importances (if the loaded model exposes them)
+- Digital twin history (plots: temperature over time, health score)
+- A form to run predictions and see the last prediction
 
-1. Change to the frontend folder and install dependencies:
-
-```powershell
-cd frontend
-npm install
-```
-
-2. Start the dev server:
-
-```powershell
-npm run dev
-```
-
-The React app will run on http://localhost:5173 by default and calls the backend at http://localhost:8000.
-
-Streamlit frontend (quick and easy)
-
-1. Install the Streamlit frontend dependencies (recommended in a virtualenv):
+Run the dashboard locally (recommended for development):
 
 ```powershell
 python -m venv .venv-frontend
 .venv-frontend\Scripts\Activate.ps1
 pip install -r frontend/requirements.txt
-```
-
-2. Run the Streamlit app:
-
-```powershell
 streamlit run frontend/streamlit_app.py
 ```
 
-The dashboard will open in your browser (usually http://localhost:8501). Use the Refresh button to fetch active dashboard details such as model status and items count. Use Run Predict to send a features vector to `/predict`.
+If you run Docker Compose, the dashboard service is started by the `dashboard` service and will be available at http://localhost:8501 (it uses `BACKEND_URL=http://web:8000`).
 
-Production
-- Build the frontend and serve it from a static host or integrate it into the Docker image. For local dev the bind-mount of `smart_home_model.pkl` allows replacing the model without rebuilding.
+Notes on features & predictions
 
-Notes
-- CORS is enabled to allow a dev React server to call the API. Lock down origins before deploying to production.
+- Use `GET /feature-columns` to learn the correct order of features for `/predict`.
+- The backend validates feature vector length against the model's `n_features_in_` when available and returns a helpful 400 error if they mismatch.
+- The Streamlit app fetches `/model-info` to render feature importances and `/history` to display recent telemetry and health score charts.
+
+Troubleshooting
+
+- If `/predict` returns HTTP 400 complaining about feature length, call `/feature-columns` and supply the correct number and order of features.
+- If `/history` returns 404, make sure `digital_twin_history.csv` exists in the repo root (it is included in the repository by default).
+
+Security & production notes
+
+- CORS is enabled for development convenience; restrict `allow_origins` in production.
+- Pickled models are sensitive to library versions — ensure your environment matches the version used to save the model (scikit-learn pinned to 1.6.1 in `requirements.txt`).
+
+If you'd like, I can also:
+- Add a small UI panel in Streamlit to show the confusion matrix (if you provide a test set or we store predictions),
+- Add an endpoint to compute model performance on an uploaded test CSV,
+- Or embed the complete notebook visualizations directly into the dashboard.
+
+---
+
+Generated on: 2025-10-16
+
